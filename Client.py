@@ -132,37 +132,26 @@ class Client:
 					rtpPacket = RtpPacket()
 					rtpPacket.decode(data)
 
-					currSeq = rtpPacket.seqNum() #Lưu sequence number của RTP packet hiện tại
 					self.totalPacketsReceived += 1
-					# 1. Phát hiện mất packet
-					if self.expectedSeqNum != 0 and currSeq > self.expectedSeqNum:
-						# Mất packet → frame này hỏng
-						self.discardCurrentFrame = True #frame này hỏng 
-						self.buffer = bytearray()   # bỏ dữ liệu đang ghép dở
+					# 1. GHÉP PAYLOAD (KHÔNG detect packet loss)
+					payload = rtpPacket.getPayload()
+					self.buffer += payload
 
-					self.expectedSeqNum = currSeq + 1 #Lưu sequence number mà client mong đợi nhận tiếp theo
-					
-					# 2. Chỉ ghép nếu frame chưa bị hỏng
-					if not self.discardCurrentFrame:
-						payload = rtpPacket.getPayload()
-						self.buffer += payload # Append payload to buffer
-					# 3. Nếu là packet đánh dấu kết thúc frame, xử lý tiếp:
+					# 2. NẾU LÀ PACKET KẾT THÚC FRAME
 					if rtpPacket.getMarker():
-						if not self.discardCurrentFrame and len(self.buffer) > 0: # Frame hợp lệ
-							try:
-									currSeq = rtpPacket.seqNum()   # Lấy số thứ tự của frame hiện tại
-									print("Current RTP Seq Num:", currSeq)
-									img = Image.open(BytesIO(self.buffer))   
-									self.frameBuffer.append(img.copy()) # Thêm frame vào buffer để phát
-									self.frameNbr += 1   # Số FRAME HỢP LỆ đã được decode & đưa ra phát
-							except:
-									pass
-						else:
-							self.totalLostFrames += 1 # Frame lost
+						try:
+							currSeq = rtpPacket.seqNum()   # seqNum = frame number
+							print("Current RTP Frame Seq Num:", currSeq)
 
-        				# Reset cho frame tiếp theo
+							img = Image.open(BytesIO(self.buffer))   
+							self.frameBuffer.append(img.copy()) # Thêm frame vào buffer để phát
+							self.frameNbr += 1   # Số FRAME HỢP LỆ đã decode
+						except:
+							# Decode fail → frame hỏng
+							self.totalLostFrames += 1
+
+						# 3. RESET BUFFER CHO FRAME TIẾP THEO
 						self.buffer = bytearray()
-						self.discardCurrentFrame = False
 			except:
 				# Stop listening upon requesting PAUSE or TEARDOWN
 				if self.playEvent.is_set():
@@ -198,7 +187,7 @@ class Client:
 		photo = ImageTk.PhotoImage(img)
 		self.label.configure(image = photo, height=288) 
 		self.label.image = photo
-		
+
 	def connectToServer(self):
 		"""Connect to the Server. Start a new RTSP/TCP session."""
 		self.rtspSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

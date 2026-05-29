@@ -110,7 +110,7 @@ class ServerWorker:
 	def sendRtp(self):
 		"""Send RTP packets over UDP."""
 		while True:
-			self.clientInfo['event'].wait(0.07) 
+			self.clientInfo['event'].wait(0.05) 
 			
 			# Stop sending if request is PAUSE or TEARDOWN
 			if self.clientInfo['event'].isSet(): 
@@ -123,7 +123,12 @@ class ServerWorker:
 					address = self.clientInfo['rtspSocket'][1][0]
 					port = int(self.clientInfo['rtpPort'])
 
-					MAX_PAYLOAD = 1400 
+					ETHERNET_MTU = 1500          # MTU chuẩn của Ethernet
+					IP_HEADER = 20               # IPv4 header
+					UDP_HEADER = 8               # UDP header
+					RTP_HEADER = 12              # RTP header
+					MAX_PAYLOAD = ETHERNET_MTU - (IP_HEADER + UDP_HEADER + RTP_HEADER)
+					# MAX_PAYLOAD ≈ 1460 bytes 
 					dataLen = len(data)
 					curPos = 0
 					while(curPos < dataLen): # send data in chunks
