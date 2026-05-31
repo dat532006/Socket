@@ -62,6 +62,11 @@ The application is divided into two main parts:
 | `VideoStream.py` | Reads MJPEG data and extracts JPEG frames. |
 | `movie.Mjpeg` | Sample MJPEG video file. |
 | `TestSocketok.mjpeg` | Additional MJPEG test video file. |
+| `ReportSocket.pdf` | Project report documenting the design, implementation, and results. |
+
+## Project Report
+
+A detailed report of the project is available in [`ReportSocket.pdf`](ReportSocket.pdf). It documents the system design, implementation details, networking decisions, and results.
 
 ## Requirements
 
