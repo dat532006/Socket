@@ -2,11 +2,10 @@ import sys
 from time import time
 HEADER_SIZE = 12
 
-class RtpPacket:	
-	header = bytearray(HEADER_SIZE)
-	
+class RtpPacket:
 	def __init__(self):
-		pass
+		self.header = bytearray(HEADER_SIZE)
+		self.payload = b''
 		
 	def encode(self, version, padding, extension, cc, seqnum, marker, pt, ssrc, payload):
 		"""Encode the RTP packet with header fields and payload."""
@@ -29,7 +28,7 @@ class RtpPacket:
 		header[1] = header[1] | (pt & 0x7F)
 		header[2] = (seqnum >> 8) & 0xFF
 		header[3] = seqnum & 0xFF
-		header[4] = (timestamp >> 24)
+		header[4] = (timestamp >> 24) & 0xFF
 		header[5] = (timestamp >> 16) & 0xFF
 		header[6] = (timestamp >> 8) & 0xFF
 		header[7] = timestamp & 0xFF

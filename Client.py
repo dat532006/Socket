@@ -36,10 +36,10 @@ class Client:
 		self.teardownAcked = 0
 		self.connectToServer()
 		self.frameNbr = 0
-		self.expectedSeqNum = 0
 		self.totalPacketsReceived = 0
-		self.discardCurrentFrame = False
-        # Buffer to hold RTP payload data
+		# Sequence number (frame number) of the frame currently being assembled
+		self.currentFrameSeq = -1
+		# Buffer to hold RTP payload data
 		self.buffer = bytearray()
 		# Statistics variables
 		self.startTime = 0
@@ -133,40 +133,55 @@ class Client:
 					rtpPacket.decode(data)
 
 					self.totalPacketsReceived += 1
-					# 1. GHÉP PAYLOAD (KHÔNG detect packet loss)
-					payload = rtpPacket.getPayload()
-					self.buffer += payload
+					currSeq = rtpPacket.seqNum()   # seqNum = frame number
 
-					# 2. NẾU LÀ PACKET KẾT THÚC FRAME
+					# 1. PHÁT HIỆN MẤT GÓI MARKER:
+					# Tất cả các gói cùng một frame có cùng seqNum. Nếu seqNum đổi
+					# trong khi buffer chưa rỗng nghĩa là gói marker của frame trước
+					# đã bị mất → bỏ frame hỏng đó để không ghép lẫn sang frame mới.
+					if self.currentFrameSeq != -1 and currSeq != self.currentFrameSeq and len(self.buffer) > 0:
+						self.buffer = bytearray()
+						self.totalLostFrames += 1
+					self.currentFrameSeq = currSeq
+
+					# 2. GHÉP PAYLOAD
+					self.buffer += rtpPacket.getPayload()
+
+					# 3. NẾU LÀ PACKET KẾT THÚC FRAME
 					if rtpPacket.getMarker():
+						print("Current RTP Frame Seq Num:", currSeq)
 						try:
-							currSeq = rtpPacket.seqNum()   # seqNum = frame number
-							print("Current RTP Frame Seq Num:", currSeq)
-
-							img = Image.open(BytesIO(self.buffer))   
+							img = Image.open(BytesIO(self.buffer))
 							self.frameBuffer.append(img.copy()) # Thêm frame vào buffer để phát
 							self.frameNbr += 1   # Số FRAME HỢP LỆ đã decode
-						except:
+						except Exception:
 							# Decode fail → frame hỏng
 							self.totalLostFrames += 1
 
-						# 3. RESET BUFFER CHO FRAME TIẾP THEO
+						# RESET BUFFER CHO FRAME TIẾP THEO
 						self.buffer = bytearray()
-			except:
+						self.currentFrameSeq = -1
+			except socket.timeout:
+				# Timeout (0.5s) là bình thường khi không có dữ liệu (PAUSE...).
 				# Stop listening upon requesting PAUSE or TEARDOWN
 				if self.playEvent.is_set():
 					self.receiverRunning = False
 					break
-				
+
 				# Upon receiving ACK for TEARDOWN request,
 				# close the RTP socket
 				if self.teardownAcked == 1:
 					self.rtpSocket.shutdown(socket.SHUT_RDWR)
 					self.rtpSocket.close()
 					break
+			except Exception:
+				# Lỗi socket khác (vd: socket đã đóng khi teardown)
+				if self.playEvent.is_set() or self.teardownAcked == 1:
+					self.receiverRunning = False
+					break
 
 	def bufferPlayer(self): # Play video from the frame buffer
-		fps = 30
+		fps = 20  # Đồng bộ với tốc độ gửi của server (event.wait(0.05) ≈ 20 fps)
 		delay = 1.0 / fps
 		print("\n PLAYING... \n")
 		while self.state != self.PLAYING:
@@ -272,18 +287,39 @@ class Client:
 	def parseRtspReply(self, data):
 		"""Parse the RTSP reply from the server."""
 		lines = data.split('\n')
-		seqNum = int(lines[1].split(' ')[1])
-		
+		# Reply tối thiểu phải có 3 dòng: status, CSeq, Session
+		if len(lines) < 3:
+			print("Malformed RTSP reply:\n" + data)
+			return
+		try:
+			seqNum = int(lines[1].split(' ')[1])
+		except (IndexError, ValueError):
+			print("Malformed RTSP reply (CSeq):\n" + data)
+			return
+
 		# Process only if the server reply's sequence number is the same as the request's
 		if seqNum == self.rtspSeq:
-			session = int(lines[2].split(' ')[1])
+			try:
+				session = int(lines[2].split(' ')[1])
+			except (IndexError, ValueError):
+				print("Malformed RTSP reply (Session):\n" + data)
+				return
 			# New RTSP session ID
 			if self.sessionId == 0:
 				self.sessionId = session
 			
 			# Process only if the session ID is the same
 			if self.sessionId == session:
-				if int(lines[0].split(' ')[1]) == 200: 
+				try:
+					statusCode = int(lines[0].split(' ')[1])
+				except (IndexError, ValueError):
+					print("Malformed RTSP reply (status):\n" + data)
+					return
+				if statusCode != 200:
+					tkMessageBox.showwarning('RTSP Error',
+						'Server returned error: ' + lines[0])
+					return
+				if statusCode == 200:
 					if self.requestSent == self.SETUP:
 						#-------------
 						# TO COMPLETE
@@ -326,7 +362,6 @@ class Client:
 		try:
 			# Bind the socket to the address using the RTP port given by the client user
 			# ...
-			self.state = self.READY
 			self.rtpSocket.bind(('', self.rtpPort))
 		except:
 			tkMessageBox.showwarning('Unable to Bind', 'Unable to bind PORT=%d' %self.rtpPort)
